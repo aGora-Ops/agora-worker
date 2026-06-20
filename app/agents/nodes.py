@@ -7,18 +7,23 @@ import boto3
 
 from app.core.config import settings
 from app.agents.state import AgentState
+from app.services.bedrock_client import _bedrock_boto3_kwargs
 
 logger = logging.getLogger(__name__)
-
-_bedrock_agent_client = boto3.client("bedrock-agent-runtime", region_name=settings.AWS_REGION)
 
 _MAX_RETRIES = 2
 
 
 def _invoke_bedrock_agent(agent_alias_id: str, session_id: str, prompt: str) -> str:
+    # Create client per-call so cross-account credentials are always fresh.
+    client = boto3.client(
+        "bedrock-agent-runtime",
+        region_name=settings.AWS_REGION,
+        **_bedrock_boto3_kwargs(),
+    )
     for attempt in range(_MAX_RETRIES + 1):
         try:
-            response = _bedrock_agent_client.invoke_agent(
+            response = client.invoke_agent(
                 agentId=settings.BEDROCK_AGENT_IDS.get(agent_alias_id, ""),
                 agentAliasId=settings.BEDROCK_AGENT_ALIAS_IDS.get(agent_alias_id, "TSTALIASID"),
                 sessionId=session_id,
@@ -29,7 +34,7 @@ def _invoke_bedrock_agent(agent_alias_id: str, session_id: str, prompt: str) -> 
                 if "chunk" in event:
                     completion += event["chunk"]["bytes"].decode()
             return completion.strip()
-        except _bedrock_agent_client.exceptions.ThrottlingException:
+        except client.exceptions.ThrottlingException:
             if attempt < _MAX_RETRIES:
                 time.sleep(2 ** (attempt + 1))
                 continue
