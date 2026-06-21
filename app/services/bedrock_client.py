@@ -140,3 +140,51 @@ Analyze the failure and provide a fix. Respond with ONLY valid JSON in this exac
                 ) from exc
 
         raise RuntimeError("Bedrock invocation failed after retries") from last_exception
+
+    def generate_yaml_fix(self, workflow_yaml: str, root_cause: str) -> str:
+        """Directly generate a corrected workflow YAML via the Converse API.
+
+        Used as a fallback when the yaml_fixer Bedrock Agent returns a capability
+        refusal instead of actual YAML (e.g. its system prompt restricts it from
+        writing files). This path calls the model directly — no agent, no tool use.
+
+        Returns:
+            The corrected YAML as a string.
+        Raises:
+            RuntimeError: If the model refuses or returns unusable output.
+        """
+        prompt = (
+            "You are an expert GitHub Actions DevOps engineer.\n\n"
+            f"Root cause of failure: {root_cause}\n\n"
+            "Original workflow YAML that failed:\n"
+            "```yaml\n"
+            f"{workflow_yaml}\n"
+            "```\n\n"
+            "Instructions:\n"
+            "- Apply the minimal fix to resolve the root cause.\n"
+            "- Return ONLY the complete corrected YAML — no prose, no markdown fences, "
+            "no explanations, no JSON wrapper.\n"
+            "- Start your response with 'name:' or 'on:' (the first YAML key)."
+        )
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            try:
+                response = self._client.converse(
+                    modelId=self._model_id,
+                    messages=[{"role": "user", "content": [{"text": prompt}]}],
+                    inferenceConfig={"maxTokens": 8192},
+                )
+                raw: str = response["output"]["message"]["content"][0]["text"].strip()
+                # Strip any accidental markdown fences
+                if raw.startswith("```"):
+                    lines = raw.splitlines()
+                    raw = "\n".join(l for l in lines if not l.startswith("```")).strip()
+                if not raw:
+                    raise ValueError("Model returned empty YAML fix")
+                return raw
+            except self._client.exceptions.ThrottlingException:
+                if attempt < max_retries:
+                    time.sleep(2 ** (attempt + 1))
+                    continue
+                raise
+        raise RuntimeError("generate_yaml_fix: Bedrock invocation failed after retries")

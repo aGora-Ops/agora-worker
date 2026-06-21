@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 import time
 import uuid
 
@@ -145,6 +146,27 @@ def analyse_root_cause(state: AgentState) -> AgentState:
     return {**state, "root_cause": root_cause, "root_cause_severity": severity, "agent_trace": trace}
 
 
+def _looks_like_yaml(text: str) -> bool:
+    """Heuristic: return True when the text looks like YAML rather than English prose.
+
+    Bedrock Agents sometimes refuse to produce YAML and instead return a capability
+    disclaimer like "The agent does not have the capability to directly modify the
+    YAML file".  We detect this by checking that the response contains at least one
+    YAML key-value line (``key: value`` or ``key:`` alone on a line) within the first
+    20 lines and does NOT start with a long English sentence.
+    """
+    lines = [l for l in text.strip().splitlines() if l.strip()][:20]
+    if not lines:
+        return False
+    # A plain English disclaimer will usually start with a capital word and no colon in pos 1-30
+    first = lines[0].strip()
+    if first and first[0].isupper() and ":" not in first[:40] and not first.startswith("name"):
+        return False
+    yaml_key_pattern = re.compile(r"^\s*[\w\-\.]+\s*:")
+    matching = sum(1 for l in lines if yaml_key_pattern.match(l))
+    return matching >= 2
+
+
 def generate_fix(state: AgentState) -> AgentState:
     session_id = str(uuid.uuid4())
     prompt = (
@@ -163,7 +185,25 @@ def generate_fix(state: AgentState) -> AgentState:
     if fixed_yaml.startswith("```"):
         lines = fixed_yaml.splitlines()
         fixed_yaml = "\n".join(l for l in lines if not l.startswith("```")).strip()
+
     trace = state.get("agent_trace", [])
+
+    if not _looks_like_yaml(fixed_yaml):
+        # The agent returned a capability refusal or English prose instead of YAML.
+        # Fall back to calling the Bedrock Converse API directly.
+        logger.warning(
+            "yaml_fixer agent returned non-YAML response (capability refusal?). "
+            "Falling back to direct Bedrock Converse API. Agent response was: %r",
+            fixed_yaml[:200],
+        )
+        trace.append("generate_fix → agent refused, falling back to Converse API")
+        from app.services.bedrock_client import BedrockRemediationClient
+        fallback = BedrockRemediationClient()
+        fixed_yaml = fallback.generate_yaml_fix(
+            workflow_yaml=state["workflow_yaml"],
+            root_cause=state["root_cause"],
+        )
+
     trace.append("generate_fix → suggested_yaml produced")
     return {**state, "suggested_yaml": fixed_yaml, "agent_trace": trace}
 
