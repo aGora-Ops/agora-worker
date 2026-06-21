@@ -16,6 +16,11 @@ class Settings(BaseSettings):
 
     GITHUB_TOKEN: str = ""
 
+    # In-cluster MCP servers (SSE). Bedrock agents return control to the worker,
+    # which calls these tools and re-invokes the agent with the result.
+    MCP_GITHUB_URL: str = "http://agora-mcp-github.agora.svc.cluster.local:8010/sse"
+    MCP_AWS_URL: str = "http://agora-mcp-aws.agora.svc.cluster.local:8011/sse"
+
     DATABASE_URL: str = "postgresql://agora:password@postgres:5432/agora"
     REDIS_URL: str = "redis://redis:6379/0"
 
