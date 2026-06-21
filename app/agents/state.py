@@ -18,5 +18,7 @@ class AgentState(TypedDict, total=False):
     security_findings: list[str]
     pr_title: str
     pr_description: str
+    confidence_score: int        # 0–100 — how confident the AI is the fix is correct
+    confidence_reasoning: str    # short explanation of the score
     error: str | None
     agent_trace: list[str]

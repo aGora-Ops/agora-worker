@@ -261,3 +261,66 @@ def should_block_high_risk(state: AgentState) -> str:
     if state.get("security_risk_score", 0) >= 8:
         return "block"
     return "approve"
+
+
+def score_confidence(state: AgentState) -> AgentState:
+    """Score how confident we are that the suggested fix is correct (0–100).
+
+    Uses the Bedrock Converse API directly (not a Bedrock Agent) to avoid
+    the system-prompt restrictions that plague the yaml_fixer agent.
+    Falls back to a heuristic score if Bedrock is unavailable so this node
+    never blocks the pipeline.
+    """
+    from app.services.bedrock_client import BedrockRemediationClient, _bedrock_boto3_kwargs
+
+    trace = state.get("agent_trace", [])
+    suggested = state.get("suggested_yaml", "")
+
+    # If there is no YAML (blocked by security or empty), score 0
+    if not suggested or state.get("error"):
+        trace.append("score_confidence → 0 (no suggested YAML or pipeline error)")
+        return {**state, "confidence_score": 0, "confidence_reasoning": "No fix was produced.", "agent_trace": trace}
+
+    findings_text = "; ".join(state.get("security_findings", [])) or "none"
+
+    prompt = (
+        "You are a senior DevOps engineer reviewing an AI-generated GitHub Actions YAML fix.\n\n"
+        f"FAILURE CATEGORY: {state.get('failure_category', 'UNKNOWN')}\n"
+        f"ROOT CAUSE: {state.get('root_cause', '')}\n"
+        f"SECURITY RISK SCORE: {state.get('security_risk_score', 0)}/10\n"
+        f"SECURITY FINDINGS: {findings_text}\n\n"
+        "ORIGINAL FAILING YAML:\n"
+        f"{state.get('workflow_yaml', '')[:2000]}\n\n"
+        "SUGGESTED FIX YAML:\n"
+        f"{suggested[:2000]}\n\n"
+        "Score your confidence that this fix correctly resolves the root cause WITHOUT introducing new problems.\n"
+        "Consider: Does the fix directly address the root cause? Is it minimal? Are there any risks?\n\n"
+        'Respond ONLY with JSON: {"score": <0-100>, "reasoning": "<one sentence>"}\n'
+        "score=90-100: fix is clearly correct and minimal.\n"
+        "score=70-89: likely correct but has minor uncertainty.\n"
+        "score=50-69: fix is plausible but incomplete or broad.\n"
+        "score=0-49: fix is wrong, risky, or doesn't address root cause."
+    )
+
+    try:
+        client_obj = BedrockRemediationClient()
+        response = client_obj._client.converse(
+            modelId=client_obj._model_id,
+            messages=[{"role": "user", "content": [{"text": prompt}]}],
+            inferenceConfig={"maxTokens": 256},
+        )
+        raw: str = response["output"]["message"]["content"][0]["text"].strip()
+        if raw.startswith("```"):
+            raw = "\n".join(l for l in raw.splitlines() if not l.startswith("```")).strip()
+        parsed = json.loads(raw)
+        score = max(0, min(100, int(parsed.get("score", 50))))
+        reasoning = parsed.get("reasoning", "")
+    except Exception as exc:
+        logger.warning("score_confidence failed, using heuristic: %s", exc)
+        # Heuristic fallback: deduct from 80 based on security risk
+        risk = state.get("security_risk_score", 0)
+        score = max(10, 80 - (risk * 5))
+        reasoning = "Heuristic score (Bedrock unavailable)."
+
+    trace.append(f"score_confidence → {score}/100")
+    return {**state, "confidence_score": score, "confidence_reasoning": reasoning, "agent_trace": trace}
