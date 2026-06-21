@@ -240,6 +240,67 @@ def _update_remediation(
     )
     session.commit()
 
+def _ingest_embedding(
+    session: Session,
+    remediation_id: uuid.UUID,
+    org_login: str,
+    repo_name: str,
+    workflow_file: str,
+    failure_category: str | None,
+    root_cause: str,
+    suggested_yaml: str | None,
+    logs_excerpt: str = "",
+) -> None:
+    """Embed a remediation's context and upsert it into log_embeddings for RAG.
+
+    Best-effort: failures here must never break the remediation flow, so the
+    caller wraps this in try/except. One chunk per remediation is plenty for
+    this corpus size; re-running replaces the prior row (idempotent).
+    """
+    from app.services.embeddings import embed_text, to_pgvector
+
+    chunk = (
+        f"Repository: {org_login}/{repo_name}\n"
+        f"Workflow: {workflow_file}\n"
+        f"Failure category: {failure_category or 'UNKNOWN'}\n"
+        f"Root cause: {root_cause}\n\n"
+        f"Suggested fix (YAML):\n{(suggested_yaml or '')[:1500]}\n\n"
+        f"Log excerpt:\n{logs_excerpt[:1500]}"
+    )
+    embedding = embed_text(chunk)
+    meta = json.dumps({
+        "org_login": org_login,
+        "repo_name": repo_name,
+        "workflow_file": workflow_file,
+        "failure_category": failure_category or "UNKNOWN",
+    })
+    session.execute(
+        text("DELETE FROM log_embeddings WHERE source_type = 'remediation' AND source_id = :sid"),
+        {"sid": str(remediation_id)},
+    )
+    session.execute(
+        text(
+            """
+            INSERT INTO log_embeddings
+                (source_type, source_id, org_login, repo_name, failure_category,
+                 chunk_text, embedding, metadata)
+            VALUES
+                ('remediation', :sid, :org, :repo, :cat,
+                 :chunk, CAST(:emb AS vector), CAST(:meta AS jsonb))
+            """
+        ),
+        {
+            "sid": str(remediation_id),
+            "org": org_login,
+            "repo": repo_name,
+            "cat": failure_category,
+            "chunk": chunk,
+            "emb": to_pgvector(embedding),
+            "meta": meta,
+        },
+    )
+    session.commit()
+
 @app.task(bind=True, max_retries=3, default_retry_delay=30)
 def upsert_workflow_run_task(self, message: dict) -> dict:
     """Persist/update a workflow_run row for non-failure events."""
@@ -369,6 +430,16 @@ def process_failed_workflow(self, message: dict) -> dict:
             "root_cause": root_cause,
         })
 
+        # Index this remediation for semantic (RAG) search in Pipeline Chat.
+        # Best-effort — never fail the analysis if embedding/Bedrock hiccups.
+        try:
+            _ingest_embedding(
+                session, remediation_id, repo_owner, repo_name, workflow_file,
+                failure_category, root_cause, suggested_yaml, scrubbed_logs,
+            )
+        except Exception as embed_exc:
+            logger.warning("Embedding ingestion failed for remediation %s: %s", remediation_id, embed_exc)
+
         logger.info("Analysis completed for run %s (remediation %s)", run_id, remediation_id)
         return {"status": "analyzed", "remediation_id": str(remediation_id)}
 
@@ -393,6 +464,50 @@ def process_failed_workflow(self, message: dict) -> dict:
         session.close()
         if github:
             github.close()
+
+@app.task(bind=True, max_retries=1, default_retry_delay=60)
+def backfill_embeddings_task(self, limit: int = 500) -> dict:
+    """Embed existing analyzed remediations into log_embeddings for RAG.
+
+    One-shot catch-up for remediations created before embedding-on-analysis
+    existed (or after the log_embeddings table is first created). Logs aren't
+    persisted on the remediation row, so backfill embeds root_cause + fix only.
+    """
+    session = SyncSessionLocal()
+    embedded = 0
+    try:
+        rows = session.execute(
+            text(
+                """
+                SELECT r.id, r.org_login, r.repo_name, r.workflow_file,
+                       r.failure_category, r.root_cause, r.suggested_yaml
+                FROM remediations r
+                WHERE r.root_cause <> ''
+                  AND NOT EXISTS (
+                      SELECT 1 FROM log_embeddings e
+                      WHERE e.source_type = 'remediation' AND e.source_id = r.id
+                  )
+                ORDER BY r.created_at DESC
+                LIMIT :lim
+                """
+            ),
+            {"lim": limit},
+        ).fetchall()
+
+        for row in rows:
+            try:
+                _ingest_embedding(
+                    session, row.id, row.org_login, row.repo_name, row.workflow_file,
+                    row.failure_category, row.root_cause, row.suggested_yaml, "",
+                )
+                embedded += 1
+            except Exception as exc:
+                logger.warning("Backfill embedding failed for remediation %s: %s", row.id, exc)
+
+        logger.info("Embedding backfill complete: %s remediations embedded", embedded)
+        return {"status": "completed", "embedded": embedded}
+    finally:
+        session.close()
 
 _BACKFILL_MAX_RUNS_PER_REPO = 200
 _BACKFILL_LOW_RATE_LIMIT_THRESHOLD = 50
