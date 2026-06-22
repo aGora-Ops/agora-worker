@@ -18,6 +18,7 @@ import time
 import boto3
 
 from app.core.config import settings
+from app.core.health import mark_ready, start_health_server
 from app.tasks.remediation import (
     backfill_org_runs_task,
     process_failed_workflow,
@@ -48,9 +49,13 @@ def _dispatch(message: dict) -> None:
 
 def run() -> None:
     """Long-poll the SQS queue forever, dispatching each message to Celery."""
+    start_health_server(port=8080)
+
     client = boto3.client("sqs", region_name=settings.AWS_REGION)
     queue_url = settings.SQS_QUEUE_URL
     logger.info("Starting SQS consumer, polling %s", queue_url)
+
+    mark_ready()
 
     while True:
         try:

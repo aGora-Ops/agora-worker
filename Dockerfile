@@ -22,10 +22,12 @@ COPY app/ ./app/
 RUN chown -R appuser:appgroup /app
 USER appuser
 
-# Celery doesn't expose an HTTP port, but we can verify the worker is alive
-# by checking that the process started. The liveness probe in Kubernetes uses
-# "celery inspect ping" instead; this HEALTHCHECK is for docker-compose use.
+EXPOSE 8080
+
+# app.main starts a stdlib HTTP health server (:8080/healthz, /ready) on a
+# daemon thread before the Celery worker boots, used for HEALTHCHECK here
+# and for the K8s liveness/readiness probes in the Helm chart.
 HEALTHCHECK --interval=60s --timeout=15s --start-period=30s --retries=3 \
-  CMD celery -A app.main.app inspect ping -d "celery@$HOSTNAME" || exit 1
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz')"
 
 CMD ["celery", "-A", "app.main.app", "worker", "--loglevel=info", "-Q", "remediation", "-c", "2"]

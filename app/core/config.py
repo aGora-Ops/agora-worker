@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     SQS_QUEUE_URL: str = "https://sqs.us-east-1.amazonaws.com/123456789/agora-webhooks"
     BEDROCK_MODEL_ID: str = "amazon.nova-pro-v1:0"
 
-    # Cross-account Bedrock access (company account).
+    # Cross-account Bedrock access (Bedrock account).
     # When set, the worker assumes this role before every Bedrock call.
     # Leave empty to call Bedrock directly with the pod's IRSA role (same account).
     BEDROCK_CROSS_ACCOUNT_ROLE_ARN: str = ""
