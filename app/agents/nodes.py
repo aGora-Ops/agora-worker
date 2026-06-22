@@ -282,22 +282,46 @@ def _validate_fix(original: str, fixed: str) -> tuple[bool, str]:
 
 def generate_fix(state: AgentState) -> AgentState:
     from app.services.bedrock_client import BedrockRemediationClient
+    import yaml
 
     trace = state.get("agent_trace", [])
     client = BedrockRemediationClient()
     original = state["workflow_yaml"]
 
     fixed = ""
-    last_reason = "unknown"
-    for attempt in range(2):
-        candidate = _strip_fences(
-            client.generate_yaml_fix(
-                workflow_yaml=original,
-                root_cause=state["root_cause"],
-                failure_category=state.get("failure_category", "UNKNOWN"),
-                logs=state.get("logs", ""),
-            )
-        )
+    last_error_context = "unknown"
+    candidate = None
+
+    # Try up to 3 times (1 initial attempt + 2 correction attempts)
+    for attempt in range(3):
+        if attempt == 0:
+            logger.info("Attempt 1: Generating initial YAML fix from Bedrock")
+            try:
+                raw_candidate = client.generate_yaml_fix(
+                    workflow_yaml=original,
+                    root_cause=state["root_cause"],
+                    failure_category=state.get("failure_category", "UNKNOWN"),
+                    logs=state.get("logs", ""),
+                )
+            except Exception as exc:
+                last_error_context = f"Bedrock invocation failed: {str(exc)}"
+                logger.warning(f"generate_fix attempt {attempt + 1} Bedrock error: {last_error_context}")
+                continue
+        else:
+            logger.info(f"Attempt {attempt + 1}: Self-correcting malformed YAML fix")
+            try:
+                raw_candidate = client.correct_yaml_syntax(
+                    original_yaml=original,
+                    malformed_yaml=candidate,
+                    error_message=last_error_context
+                )
+            except Exception as exc:
+                last_error_context = f"Bedrock correction invocation failed: {str(exc)}"
+                logger.warning(f"generate_fix attempt {attempt + 1} Bedrock error: {last_error_context}")
+                continue
+
+        candidate = _strip_fences(raw_candidate)
+        
         # Post-process to fix common formatting anomalies where colons lack trailing space
         import re
         lines = []
@@ -310,18 +334,37 @@ def generate_fix(state: AgentState) -> AgentState:
                 lines.append(line)
         candidate = "\n".join(lines)
 
-        ok, reason = _validate_fix(original, candidate)
-        if ok:
+        # Validate the candidate
+        if not candidate or not candidate.strip():
+            last_error_context = "Validation failed: Suggested YAML is empty."
+            logger.warning(f"generate_fix attempt {attempt + 1} validation failed: {last_error_context}")
+            continue
+
+        if candidate.strip() == original.strip():
+            last_error_context = "Validation failed: Suggested YAML is identical to the original workflow; no change was made."
+            logger.warning(f"generate_fix attempt {attempt + 1} validation failed: {last_error_context}")
+            continue
+
+        try:
+            parsed = yaml.safe_load(candidate)
+            if not isinstance(parsed, dict) or "jobs" not in parsed:
+                last_error_context = "Validation failed: Root key 'jobs' was not found in the generated workflow YAML."
+                logger.warning(f"generate_fix attempt {attempt + 1} validation failed: {last_error_context}")
+                continue
+
+            # If all checks pass, we have our valid YAML!
             fixed = candidate
             break
-        last_reason = reason
-        logger.warning("generate_fix attempt %d produced an invalid fix (%s)", attempt + 1, reason)
+
+        except yaml.YAMLError as exc:
+            last_error_context = f"YAML syntax / parsing error:\n{str(exc)}"
+            logger.warning(f"generate_fix attempt {attempt + 1} validation failed with YAMLError: {last_error_context}")
 
     if not fixed:
-        trace.append(f"generate_fix → no valid fix produced ({last_reason})")
+        trace.append("generate_fix → self-correction loop failed to produce valid YAML")
         return {**state, "suggested_yaml": None, "agent_trace": trace}
 
-    trace.append("generate_fix → suggested_yaml produced (validated)")
+    trace.append(f"generate_fix → suggested_yaml produced on attempt {attempt + 1} (validated)")
     return {**state, "suggested_yaml": fixed, "agent_trace": trace}
 
 

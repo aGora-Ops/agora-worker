@@ -255,3 +255,63 @@ Analyze the failure and provide a fix. Respond with ONLY valid JSON in this exac
                     continue
                 raise
         raise RuntimeError("generate_yaml_fix: Bedrock invocation failed after retries")
+
+    def correct_yaml_syntax(
+        self,
+        original_yaml: str,
+        malformed_yaml: str,
+        error_message: str,
+    ) -> str:
+        """Invokes Bedrock to fix syntax/parsing errors in a previously generated YAML fix.
+
+        Args:
+            original_yaml: The original failing workflow YAML.
+            malformed_yaml: The suggested YAML fix that failed to parse.
+            error_message: The YAMLError exception message from the parser.
+
+        Returns:
+            The corrected YAML string from the model.
+        """
+        prompt = (
+            "You are an expert GitHub Actions DevOps engineer. A YAML parser failed to parse a suggested YAML fix.\n\n"
+            "ORIGINAL FAILING WORKFLOW:\n"
+            "```yaml\n"
+            f"{original_yaml}\n"
+            "```\n\n"
+            "YOUR PREVIOUS SUGGESTED FIX (CONTAINING SYNTAX ERRORS):\n"
+            "```yaml\n"
+            f"{malformed_yaml}\n"
+            "```\n\n"
+            "YAML PARSER ERROR MESSAGE:\n"
+            "```\n"
+            f"{error_message}\n"
+            "```\n\n"
+            "STRICT OUTPUT RULES:\n"
+            "1. Fix the syntax/parsing error pointed to by the parser error message.\n"
+            "2. Output ONLY the corrected YAML. Zero prose. Zero markdown code fences (no ```).\n"
+            "3. Keep all other lines unchanged.\n"
+            "Output the corrected YAML now:"
+        )
+
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            try:
+                response = self._client.converse(
+                    modelId=self._model_id,
+                    messages=[{"role": "user", "content": [{"text": prompt}]}],
+                    inferenceConfig={"maxTokens": 8192, "temperature": 0},
+                )
+                raw: str = response["output"]["message"]["content"][0]["text"].strip()
+                # Strip any accidental markdown fences
+                if raw.startswith("```"):
+                    lines = raw.splitlines()
+                    raw = "\n".join(l for l in lines if not l.startswith("```")).strip()
+                if not raw:
+                    raise ValueError("Model returned empty corrected YAML fix")
+                return raw
+            except self._client.exceptions.ThrottlingException:
+                if attempt < max_retries:
+                    time.sleep(2 ** (attempt + 1))
+                    continue
+                raise
+        raise RuntimeError("correct_yaml_syntax: Bedrock invocation failed after retries")
