@@ -97,6 +97,41 @@ def _recover_suggested_yaml(
     logger.warning("Single-agent Bedrock fallback produced an invalid fix (%s)", normalized)
     return None
 
+
+def _heuristic_yaml_fix(
+    workflow_yaml: str,
+    root_cause: str,
+    failure_category: str | None,
+) -> str | None:
+    """Deterministic last-resort fix for very common version-mismatch failures.
+
+    This is intentionally narrow: we only auto-edit when the worker has a clear
+    dependency-version signal and a known bad version token to replace.
+    """
+    if (failure_category or "").upper() != "DEPENDENCY_VERSION":
+        return None
+    if "python" not in root_cause.lower() and "version" not in root_cause.lower():
+        return None
+
+    replacements = [
+        ('python-version: "99"', 'python-version: "3.12"'),
+        ("python-version: '99'", 'python-version: "3.12"'),
+        ("python-version: 99", 'python-version: "3.12"'),
+    ]
+
+    fixed = workflow_yaml
+    changed = False
+    for old, new in replacements:
+        if old in fixed:
+            fixed = fixed.replace(old, new)
+            changed = True
+
+    if not changed:
+        return None
+
+    ok, normalized = _normalize_suggested_yaml(workflow_yaml, fixed)
+    return normalized if ok else None
+
 def _publish_event(event_type: str, data: dict) -> None:
     """Fire-and-forget Redis publish so WebSocket clients get live updates."""
     try:
@@ -486,6 +521,13 @@ def process_failed_workflow(self, message: dict) -> dict:
                 logs=scrubbed_logs,
                 workflow_name=workflow_name,
                 repo_full_name=f"{repo_owner}/{repo_name}",
+            )
+
+        if not suggested_yaml:
+            suggested_yaml = _heuristic_yaml_fix(
+                workflow_yaml=workflow_yaml,
+                root_cause=root_cause,
+                failure_category=failure_category,
             )
 
         if not suggested_yaml:
