@@ -26,6 +26,7 @@ jobs:
 
   sonar:
     name: SonarCloud Scan
+    needs: python-ci
     uses: aGora-Ops/agora-workflows/.github/workflows/sonar-scan.yml@main
     with:
       service_name: agora-worker
@@ -35,7 +36,7 @@ jobs:
 
   build:
     name: Build & Scan
-    needs: [gitleaks, python-ci]
+    needs: [gitleaks, python-ci, sonar]
     uses: aGora-Ops/agora-workflows/.github/workflows/build-and-scan.yml@main
     with:
       service_name: agora-worker
