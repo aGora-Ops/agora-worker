@@ -288,6 +288,23 @@ def generate_fix(state: AgentState) -> AgentState:
     client = BedrockRemediationClient()
     original = state["workflow_yaml"]
 
+    # Compress the workflow YAML with Headroom before building prompts.
+    try:
+        from headroom import compress
+        compressed_yaml = compress(original)
+    except Exception:
+        compressed_yaml = original
+
+    # Build few-shot context from fix_memories accepted examples.
+    fix_examples = state.get("fix_examples") or []
+    few_shot_block = ""
+    if fix_examples:
+        few_shot_block = "\n\n".join(
+            f"ACCEPTED FIX EXAMPLE {i + 1}:\n```yaml\n{ex}\n```"
+            for i, ex in enumerate(fix_examples[:2])
+        )
+        trace.append(f"generate_fix → injecting {len(fix_examples[:2])} few-shot example(s) from fix_memories")
+
     fixed = ""
     last_error_context = "unknown"
     candidate = None
@@ -298,10 +315,11 @@ def generate_fix(state: AgentState) -> AgentState:
             logger.info("Attempt 1: Generating initial YAML fix from Bedrock")
             try:
                 raw_candidate = client.generate_yaml_fix(
-                    workflow_yaml=original,
+                    workflow_yaml=compressed_yaml,
                     root_cause=state["root_cause"],
                     failure_category=state.get("failure_category", "UNKNOWN"),
                     logs=state.get("logs", ""),
+                    few_shot_context=few_shot_block,
                 )
             except Exception as exc:
                 last_error_context = f"Bedrock invocation failed: {str(exc)}"

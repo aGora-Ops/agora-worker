@@ -517,9 +517,38 @@ def process_failed_workflow(self, message: dict) -> dict:
         scrubbed_logs = scrub(logs)
         workflow_yaml = scrub(workflow_yaml)
 
+        # Compress logs with Headroom before they enter the pipeline (~40-60% token reduction).
+        # Falls back to the original string if the library is unavailable.
+        try:
+            from headroom import compress
+            scrubbed_logs = compress(scrubbed_logs)
+        except Exception as hd_exc:
+            logger.debug("Headroom compression skipped: %s", hd_exc)
+
         if settings.USE_MULTI_AGENT:
             logger.info("Running multi-agent LangGraph pipeline for run %s", run_id)
             from app.agents.graph import remediation_graph
+
+            # Pull accepted fixes for the same org+repo from fix_memories as few-shot examples.
+            # Classify first so we can filter by category after the graph runs classify_failure;
+            # here we fetch by repo as a broad fallback — the node will filter by category.
+            fix_examples: list[str] = []
+            try:
+                rows = session.execute(
+                    text(
+                        """
+                        SELECT fixed_yaml FROM fix_memories
+                        WHERE org_login = :org AND repo_name = :repo
+                        ORDER BY created_at DESC
+                        LIMIT 5
+                        """
+                    ),
+                    {"org": repo_owner, "repo": repo_name},
+                ).fetchall()
+                fix_examples = [r[0] for r in rows if r[0]]
+            except Exception as fm_exc:
+                logger.debug("fix_memories fetch skipped: %s", fm_exc)
+
             final_state = remediation_graph.invoke({
                 "repo_owner": repo_owner,
                 "repo_name": repo_name,
@@ -530,6 +559,7 @@ def process_failed_workflow(self, message: dict) -> dict:
                 "run_id": run_id,
                 "github_token": github_token,
                 "agent_trace": [],
+                "fix_examples": fix_examples,
             })
             if final_state.get("error"):
                 raise RuntimeError(final_state["error"])

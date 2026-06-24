@@ -23,3 +23,4 @@ class AgentState(TypedDict, total=False):
     confidence_reasoning: str    # short explanation of the score
     error: str | None
     agent_trace: list[str]
+    fix_examples: list[str]    # accepted fixed_yaml strings from fix_memories, injected as few-shot context
