@@ -13,6 +13,7 @@ dependencies = [
   "cryptography>=48.0.1,<49.0.0",
   "redis>=5.0.0,<6.0.0",
   "langgraph>=0.2.0,<1.0.0",
+  "langchain-core>=1.2.22",
   "langchain-aws>=0.2.0,<1.0.0",
   "mcp>=1.0.0,<2.0.0",
   "pyyaml>=6.0,<7.0",
