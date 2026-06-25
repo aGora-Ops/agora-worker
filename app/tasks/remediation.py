@@ -484,6 +484,24 @@ def _ingest_embedding(
             ContentType="text/plain",
         )
         logger.debug("KB doc written to s3://%s/%s", settings.BEDROCK_KB_S3_BUCKET, key)
+
+        # Kick off a Bedrock KB ingestion job so the new doc is queryable
+        # immediately rather than waiting for the next scheduled sync.
+        if settings.BEDROCK_KB_ID:
+            try:
+                import uuid as _uuid
+                bedrock_agent = boto3.client("bedrock-agent", region_name=settings.AWS_REGION)
+                # Get the data source ID for this KB
+                ds_resp = bedrock_agent.list_data_sources(knowledgeBaseId=settings.BEDROCK_KB_ID)
+                ds_id = ds_resp["dataSourceSummaries"][0]["dataSourceId"]
+                bedrock_agent.start_ingestion_job(
+                    knowledgeBaseId=settings.BEDROCK_KB_ID,
+                    dataSourceId=ds_id,
+                    clientToken=str(_uuid.uuid4()),
+                )
+                logger.info("Bedrock KB ingestion job started for KB %s", settings.BEDROCK_KB_ID)
+            except Exception as exc:
+                logger.warning("KB ingestion job failed to start (non-fatal): %s", exc)
         return
 
     # Legacy pgvector path (used when KB is not configured).
