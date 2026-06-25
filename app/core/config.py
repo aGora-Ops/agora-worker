@@ -44,5 +44,16 @@ class Settings(BaseSettings):
     SES_FROM_EMAIL: str = ""
     FRONTEND_URL: str = "http://localhost:3000"
 
+    # Bedrock Knowledge Base — replaces the pgvector log_embeddings pipeline.
+    # Worker writes remediation docs to KB_S3_BUCKET; Bedrock ingests from S3.
+    # Leave empty to fall back to the legacy pgvector path.
+    BEDROCK_KB_ID: str = ""
+    BEDROCK_KB_S3_BUCKET: str = ""
+
+    # Bedrock Guardrail — applied to all converse() / InvokeModel calls.
+    # Leave empty to skip guardrail (dev default until first terraform apply).
+    BEDROCK_GUARDRAIL_ID: str = ""
+    BEDROCK_GUARDRAIL_VERSION: str = ""
+
 
 settings = Settings()

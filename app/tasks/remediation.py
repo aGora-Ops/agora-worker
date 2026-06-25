@@ -423,14 +423,14 @@ def _ingest_embedding(
     suggested_yaml: str | None,
     logs_excerpt: str = "",
 ) -> None:
-    """Embed a remediation's context and upsert it into log_embeddings for RAG.
+    """Write a remediation doc to the Bedrock Knowledge Base S3 source bucket.
 
-    Best-effort: failures here must never break the remediation flow, so the
-    caller wraps this in try/except. One chunk per remediation is plenty for
-    this corpus size; re-running replaces the prior row (idempotent).
+    Bedrock ingests from S3 automatically (sync is triggered on a schedule or
+    manually). Falls back to the legacy pgvector path when BEDROCK_KB_S3_BUCKET
+    is not set, so local dev / pre-apply environments continue to work.
+
+    Best-effort: failures must never break the remediation flow.
     """
-    from app.services.embeddings import embed_text, to_pgvector
-
     chunk = (
         f"Repository: {org_login}/{repo_name}\n"
         f"Workflow: {workflow_file}\n"
@@ -439,6 +439,23 @@ def _ingest_embedding(
         f"Suggested fix (YAML):\n{(suggested_yaml or '')[:1500]}\n\n"
         f"Log excerpt:\n{logs_excerpt[:1500]}"
     )
+
+    if settings.BEDROCK_KB_S3_BUCKET:
+        import boto3
+        s3 = boto3.client("s3", region_name=settings.AWS_REGION)
+        key = f"remediations/{remediation_id}.txt"
+        s3.put_object(
+            Bucket=settings.BEDROCK_KB_S3_BUCKET,
+            Key=key,
+            Body=chunk.encode(),
+            ContentType="text/plain",
+        )
+        logger.debug("KB doc written to s3://%s/%s", settings.BEDROCK_KB_S3_BUCKET, key)
+        return
+
+    # Legacy pgvector path (used when KB is not configured).
+    from app.services.embeddings import embed_text, to_pgvector
+
     embedding = embed_text(chunk)
     meta = json.dumps({
         "org_login": org_login,

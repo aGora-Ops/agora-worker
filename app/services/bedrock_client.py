@@ -7,6 +7,15 @@ import boto3
 from app.core.config import settings
 
 
+def _guardrail_config() -> dict:
+    """Return guardrailConfig kwarg for converse() if a guardrail is configured."""
+    gid = settings.BEDROCK_GUARDRAIL_ID
+    gver = settings.BEDROCK_GUARDRAIL_VERSION
+    if gid and gver:
+        return {"guardrailConfig": {"guardrailIdentifier": gid, "guardrailVersion": gver}}
+    return {}
+
+
 def _bedrock_boto3_kwargs() -> dict:
     """Return boto3 keyword args for Bedrock clients.
 
@@ -108,6 +117,7 @@ Analyze the failure and provide a fix. Respond with ONLY valid JSON in this exac
                         }
                     ],
                     inferenceConfig={"maxTokens": 8192},
+                    **_guardrail_config(),
                 )
                 raw_text: str = response["output"]["message"]["content"][0]["text"].strip()
 
@@ -251,6 +261,7 @@ Analyze the failure and provide a fix. Respond with ONLY valid JSON in this exac
                     modelId=self._model_id,
                     messages=[{"role": "user", "content": [{"text": prompt}]}],
                     inferenceConfig={"maxTokens": 8192, "temperature": 0},
+                    **_guardrail_config(),
                 )
                 raw: str = response["output"]["message"]["content"][0]["text"].strip()
                 # Strip any accidental markdown fences
@@ -315,6 +326,7 @@ Analyze the failure and provide a fix. Respond with ONLY valid JSON in this exac
                     modelId=self._model_id,
                     messages=[{"role": "user", "content": [{"text": prompt}]}],
                     inferenceConfig={"maxTokens": 8192, "temperature": 0},
+                    **_guardrail_config(),
                 )
                 raw: str = response["output"]["message"]["content"][0]["text"].strip()
                 # Strip any accidental markdown fences
