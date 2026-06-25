@@ -16,6 +16,9 @@ class Settings(BaseSettings):
 
     GITHUB_TOKEN: str = ""
 
+    GITHUB_APP_ID: str = ""
+    GITHUB_APP_PRIVATE_KEY: str = ""
+
     # MCP enrichment is optional. The worker already fetches the workflow and
     # failure logs, so remediation must work if this separate service is down.
     USE_MCP_TOOLS: bool = False

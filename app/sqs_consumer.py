@@ -22,6 +22,7 @@ from app.core.health import mark_ready, start_health_server
 from app.tasks.remediation import (
     backfill_org_runs_task,
     process_failed_workflow,
+    register_app_installation_task,
     upsert_workflow_run_task,
 )
 
@@ -43,6 +44,10 @@ def _dispatch(message: dict) -> None:
 
     if event_type == "backfill_org":
         backfill_org_runs_task.delay(message["org_login"])
+        return
+
+    if event_type == "app_installation":
+        register_app_installation_task.delay(message)
         return
 
     logger.warning("Unknown event_type in SQS message, dropping: %r", event_type)

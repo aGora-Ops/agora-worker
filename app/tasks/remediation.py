@@ -25,6 +25,7 @@ from app.core.celery_app import app
 from app.core.config import settings
 from app.core.security import decrypt_token
 from app.services.bedrock_client import BedrockRemediationClient
+from app.services.github_app import get_installation_token, github_app_configured
 from app.services.github_client import GitHubRemediationClient
 
 logger = logging.getLogger(__name__)
@@ -189,6 +190,19 @@ def _publish_event(event_type: str, data: dict) -> None:
         logger.warning("Failed to publish %s event to Redis: %s", event_type, exc)
 
 def _get_github_token_for_org(session: Session, org_login: str) -> str:
+    # Prefer GitHub App installation token — scoped to the org, no user token needed.
+    if github_app_configured():
+        row = session.execute(
+            text("SELECT installation_id FROM organizations WHERE login = :login LIMIT 1"),
+            {"login": org_login},
+        ).fetchone()
+        if row and row[0]:
+            import asyncio
+            return asyncio.get_event_loop().run_until_complete(
+                get_installation_token(row[0])
+            )
+
+    # Fall back to the org owner's OAuth token (pre-App path).
     row = session.execute(
         text(
             """
@@ -892,3 +906,74 @@ def backfill_org_runs_task(self, org_login: str) -> dict:
         session.close()
         if github:
             github.close()
+
+
+@app.task(bind=True, max_retries=3, default_retry_delay=10)
+def register_app_installation_task(self, message: dict) -> dict:
+    """Handle GitHub App installation events from SQS.
+
+    'created' → upsert org with installation_id, then kick off backfill.
+    'deleted' → remove org row (App was uninstalled).
+    """
+    import uuid as _uuid
+
+    action = message.get("action")
+    org_login = message.get("org_login")
+    org_id = message.get("org_id")
+    installation_id = message.get("installation_id")
+    avatar_url = message.get("avatar_url")
+
+    session = SyncSessionLocal()
+    try:
+        if action == "created":
+            user_row = session.execute(
+                text("SELECT id FROM users ORDER BY created_at LIMIT 1")
+            ).fetchone()
+            owner_id = str(user_row[0]) if user_row else None
+
+            if owner_id:
+                session.execute(
+                    text(
+                        """
+                        INSERT INTO organizations
+                          (id, github_org_id, login, avatar_url, webhook_secret,
+                           installation_id, sync_status, owner_id, created_at)
+                        VALUES
+                          (:id, :github_org_id, :login, :avatar_url, '',
+                           :installation_id, 'pending', :owner_id, now())
+                        ON CONFLICT (login) DO UPDATE
+                          SET installation_id = EXCLUDED.installation_id,
+                              avatar_url = EXCLUDED.avatar_url
+                        """
+                    ),
+                    {
+                        "id": str(_uuid.uuid4()),
+                        "github_org_id": org_id,
+                        "login": org_login,
+                        "avatar_url": avatar_url,
+                        "installation_id": installation_id,
+                        "owner_id": owner_id,
+                    },
+                )
+                session.commit()
+                logger.info("Registered App installation %s for org %s", installation_id, org_login)
+                backfill_org_runs_task.delay(org_login)
+            return {"status": "registered", "org_login": org_login}
+
+        elif action == "deleted":
+            session.execute(
+                text("DELETE FROM organizations WHERE login = :login"),
+                {"login": org_login},
+            )
+            session.commit()
+            logger.info("Removed org %s after App uninstall", org_login)
+            return {"status": "removed", "org_login": org_login}
+
+        return {"status": "ignored", "action": action}
+
+    except Exception as exc:
+        session.rollback()
+        logger.exception("register_app_installation_task failed: %s", exc)
+        raise self.retry(exc=exc)
+    finally:
+        session.close()
