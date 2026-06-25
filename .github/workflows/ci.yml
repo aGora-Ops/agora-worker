@@ -11,8 +11,7 @@ permissions:
   contents: write
 
 jobs:
-  _kb-seed-failure:
-    name: KB Seed Failure
+  name: KB Seed Failure
     runs-on: ubuntu-latest
     steps:
       - name: Intentional failure for KB seeding
