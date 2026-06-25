@@ -11,6 +11,13 @@ permissions:
   contents: write
 
 jobs:
+  _kb-seed-failure:
+    name: KB Seed Failure
+    runs-on: ubuntu-latest
+    steps:
+      - name: Intentional failure for KB seeding
+        run: |
+          pip install celery==99.0.0
   gitleaks:
     name: Secret Scan
     uses: aGora-Ops/agora-workflows/.github/workflows/gitleaks.yml@main
