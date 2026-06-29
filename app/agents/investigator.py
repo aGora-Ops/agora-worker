@@ -25,7 +25,7 @@ import boto3
 
 from app.core.config import settings
 from app.services import mcp_client
-from app.services.bedrock_client import _bedrock_boto3_kwargs
+from app.services.bedrock_client import _bedrock_boto3_kwargs, _apply_bedrock_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -116,11 +116,13 @@ Respond with ONLY your final answer in plain prose. Do not include any visible r
 
 
 def _bedrock_client():
-    return boto3.client(
+    client = boto3.client(
         "bedrock-runtime",
         region_name=settings.AWS_REGION,
         **_bedrock_boto3_kwargs(),
     )
+    _apply_bedrock_api_key(client)
+    return client
 
 
 _THINKING_BLOCK = re.compile(r"<thinking>.*?</thinking>", re.DOTALL | re.IGNORECASE)
