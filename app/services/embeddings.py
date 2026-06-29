@@ -1,6 +1,6 @@
-"""Amazon Titan text-embeddings helper for the RAG ingestion pipeline.
+﻿"""Amazon Titan text-embeddings helper for the RAG ingestion pipeline.
 
-Mirrors agora-api/app/services/embeddings.py. Uses titan-embed-text-v2
+Mirrors stagecraft-api/app/services/embeddings.py. Uses titan-embed-text-v2
 (1024-dim, normalized) via the same cross-account Bedrock path as the agents.
 """
 import json

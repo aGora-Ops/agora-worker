@@ -1,4 +1,4 @@
-name: CI
+﻿name: CI
 
 on:
   pull_request:
@@ -13,13 +13,13 @@ permissions:
 jobs:
   gitleaks:
     name: Secret Scan
-    uses: aGora-Ops/agora-workflows/.github/workflows/gitleaks.yml@main
+    uses: Stagecraft-Ops/stagecraft-workflows/.github/workflows/gitleaks.yml@main
     with:
-      service_name: agora-worker
+      service_name: stagecraft-worker
 
   python-ci:
     name: Lint & Test
-    uses: aGora-Ops/agora-workflows/.github/workflows/python-ci.yml@main
+    uses: Stagecraft-Ops/stagecraft-workflows/.github/workflows/python-ci.yml@main
     with:
       working-directory: .
       python-version: "3.12"
@@ -27,9 +27,9 @@ jobs:
   sonar:
     name: SonarCloud Scan
     needs: python-ci
-    uses: aGora-Ops/agora-workflows/.github/workflows/sonar-scan.yml@main
+    uses: Stagecraft-Ops/stagecraft-workflows/.github/workflows/sonar-scan.yml@main
     with:
-      service_name: agora-worker
+      service_name: stagecraft-worker
       working-directory: .
       sonar_organization: ${{ vars.SONAR_ORGANIZATION }}
     secrets: inherit
@@ -37,9 +37,9 @@ jobs:
   build:
     name: Build & Scan
     needs: [gitleaks, python-ci, sonar]
-    uses: aGora-Ops/agora-workflows/.github/workflows/build-and-scan.yml@main
+    uses: Stagecraft-Ops/stagecraft-workflows/.github/workflows/build-and-scan.yml@main
     with:
-      service_name: agora-worker
+      service_name: stagecraft-worker
       dockerfile_path: Dockerfile
       aws_region: us-east-1
       run_trivy: true
@@ -49,9 +49,9 @@ jobs:
     name: Push to ECR
     needs: build
     if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') && github.event_name == 'push'
-    uses: aGora-Ops/agora-workflows/.github/workflows/push-to-ecr.yml@main
+    uses: Stagecraft-Ops/stagecraft-workflows/.github/workflows/push-to-ecr.yml@main
     with:
-      service_name: agora-worker
+      service_name: stagecraft-worker
       git_tag: ${{ needs.build.outputs.tag }}
       tag_exists: ${{ needs.build.outputs.tag_exists }}
       aws_region: us-east-1
@@ -61,9 +61,9 @@ jobs:
     name: Update Helm Tag
     needs: push
     if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') && github.event_name == 'push'
-    uses: aGora-Ops/agora-workflows/.github/workflows/helm-update.yml@main
+    uses: Stagecraft-Ops/stagecraft-workflows/.github/workflows/helm-update.yml@main
     with:
-      service_name: agora-worker
+      service_name: stagecraft-worker
       image_tag: ${{ needs.push.outputs.tag }}
     secrets: inherit
 
@@ -71,9 +71,9 @@ jobs:
     name: Notify on Failure
     needs: [python-ci, sonar, build, push, helm-update]
     if: always() && contains(needs.*.result, 'failure')
-    uses: aGora-Ops/agora-workflows/.github/workflows/notify.yml@main
+    uses: Stagecraft-Ops/stagecraft-workflows/.github/workflows/notify.yml@main
     with:
-      service_name: agora-worker
+      service_name: stagecraft-worker
       build_result: ${{ needs.build.result }}
       push_result: ${{ needs.push.result }}
       trivy_result: ${{ needs.build.outputs.trivy_result }}

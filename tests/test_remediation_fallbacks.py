@@ -1,4 +1,4 @@
-import os
+﻿import os
 from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("DATABASE_URL", "postgresql://x:x@localhost/x")
@@ -37,7 +37,7 @@ def test_recover_suggested_yaml_uses_single_agent_when_direct_fix_is_invalid():
             failure_category="DEPENDENCY_VERSION",
             logs="setup-python could not find version 99",
             workflow_name="CI",
-            repo_full_name="aGora-Ops/agora-api",
+            repo_full_name="Stagecraft-Ops/stagecraft-api",
         )
 
     assert recovered is not None
@@ -58,7 +58,7 @@ def test_recover_suggested_yaml_returns_none_when_all_fallbacks_are_invalid():
             failure_category="UNKNOWN",
             logs="",
             workflow_name="CI",
-            repo_full_name="aGora-Ops/agora-api",
+            repo_full_name="Stagecraft-Ops/stagecraft-api",
         )
 
     assert recovered is None

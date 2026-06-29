@@ -1,4 +1,4 @@
-"""Celery tasks for the remediation pipeline.
+﻿"""Celery tasks for the remediation pipeline.
 
 Architecture (suggestion-engine model):
   1. Worker is READ-ONLY with respect to GitHub — no branch creation, no
@@ -37,7 +37,7 @@ _sync_engine = create_engine(
 )
 SyncSessionLocal = sessionmaker(bind=_sync_engine, autocommit=False, autoflush=False)
 
-REDIS_EVENTS_CHANNEL = "agora:events"
+REDIS_EVENTS_CHANNEL = "stagecraft:events"
 
 
 def _strip_code_fences(text: str) -> str:

@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import json
 import logging
 import time
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 _MAX_RETRIES = 2
 _MAX_TOOL_ROUNDS = 6
 
-# Read-only GitHub tools routed to agora-mcp-github. Write tools are NOT exposed
+# Read-only GitHub tools routed to stagecraft-mcp-github. Write tools are NOT exposed
 # here — PRs are raised only via the api-service after human review.
 _GITHUB_TOOLS = {"get_workflow_yaml", "get_run_logs"}
 
@@ -154,7 +154,7 @@ def _parse_json(raw: str) -> dict:
 
 
 # Tool config for root_cause — model may call get_run_logs or get_workflow_yaml
-# via the in-cluster agora-mcp-github SSE server.
+# via the in-cluster stagecraft-mcp-github SSE server.
 _ROOT_CAUSE_TOOLCONFIG = {
     "tools": [
         {

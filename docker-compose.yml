@@ -1,20 +1,20 @@
-services:
+﻿services:
   postgres:
     image: postgres:15-alpine
-    container_name: agora-worker-postgres
+    container_name: stagecraft-worker-postgres
     environment:
-      POSTGRES_DB: agora
-      POSTGRES_USER: agora
+      POSTGRES_DB: stagecraft
+      POSTGRES_USER: stagecraft
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-localpassword}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U agora"]
+      test: ["CMD-SHELL", "pg_isready -U stagecraft"]
       interval: 5s
       timeout: 5s
       retries: 5
 
   redis:
     image: redis:7-alpine
-    container_name: agora-worker-redis
+    container_name: stagecraft-worker-redis
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -25,9 +25,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: agora-worker
+    container_name: stagecraft-worker
     environment:
-      DATABASE_URL: postgresql://agora:${POSTGRES_PASSWORD:-localpassword}@postgres:5432/agora
+      DATABASE_URL: postgresql://stagecraft:${POSTGRES_PASSWORD:-localpassword}@postgres:5432/stagecraft
       REDIS_URL: redis://redis:6379/0
       AWS_REGION: ${AWS_REGION:-us-east-1}
       SQS_QUEUE_URL: ${SQS_QUEUE_URL:-}
@@ -45,10 +45,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: agora-consumer
+    container_name: stagecraft-consumer
     entrypoint: ["python", "-m", "app.sqs_consumer"]
     environment:
-      DATABASE_URL: postgresql://agora:${POSTGRES_PASSWORD:-localpassword}@postgres:5432/agora
+      DATABASE_URL: postgresql://stagecraft:${POSTGRES_PASSWORD:-localpassword}@postgres:5432/stagecraft
       REDIS_URL: redis://redis:6379/0
       AWS_REGION: ${AWS_REGION:-us-east-1}
       SQS_QUEUE_URL: ${SQS_QUEUE_URL:-}
@@ -64,4 +64,4 @@ services:
 
 networks:
   default:
-    name: agora-worker-network
+    name: stagecraft-worker-network
