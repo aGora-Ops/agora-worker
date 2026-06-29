@@ -22,7 +22,7 @@ USER appuser
 
 EXPOSE 8080
 
-HEALTHCHECK --interval=60s --timeout=15s --start-period=30s --retries=3 \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz')"
+# HEALTHCHECK --interval=60s --timeout=15s --start-period=30s --retries=3 \
+#   CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz')"
 
 CMD ["celery", "-A", "app.main.app", "worker", "--loglevel=info", "-Q", "remediation", "-c", "2"]
